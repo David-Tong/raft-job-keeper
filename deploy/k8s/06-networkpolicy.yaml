@@ -1,0 +1,31 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: raft-job-keeper
+  namespace: raft-job-keeper
+spec:
+  podSelector:
+    matchLabels:
+      app: raft-job-keeper
+  policyTypes: ["Ingress"]
+  ingress:
+    # Raft peer traffic: servers only
+    - from:
+        - podSelector:
+            matchLabels:
+              app: raft-job-keeper
+      ports:
+        - port: 7000
+    # Workers connect over gRPC
+    - from:
+        - podSelector:
+            matchLabels:
+              app: raft-job-keeper-worker
+      ports:
+        - port: 9090
+    # Other clients use the API (tighten as needed)
+    - from:
+        - namespaceSelector: {}
+      ports:
+        - port: 8080
+        - port: 9090

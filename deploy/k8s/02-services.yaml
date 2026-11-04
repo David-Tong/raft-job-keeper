@@ -1,0 +1,32 @@
+# Headless Service: stable per-pod DNS for the StatefulSet, used for Raft peer traffic
+apiVersion: v1
+kind: Service
+metadata:
+  name: raft-job-keeper-headless
+  namespace: raft-job-keeper
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true # peers must be resolvable before they become ready (bootstrap)
+  selector:
+    app: raft-job-keeper
+  ports:
+    - name: raft
+      port: 7000
+---
+# Client-facing API
+apiVersion: v1
+kind: Service
+metadata:
+  name: raft-job-keeper-api
+  namespace: raft-job-keeper
+spec:
+  type: ClusterIP
+  selector:
+    app: raft-job-keeper
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+    - name: grpc
+      port: 9090
+      targetPort: 9090

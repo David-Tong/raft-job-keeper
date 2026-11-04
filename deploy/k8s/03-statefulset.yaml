@@ -1,0 +1,131 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: raft-job-keeper
+  namespace: raft-job-keeper
+spec:
+  serviceName: raft-job-keeper-headless
+  replicas: 3
+  podManagementPolicy: OrderedReady
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app: raft-job-keeper
+  template:
+    metadata:
+      labels:
+        app: raft-job-keeper
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: /metrics
+    spec:
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: raft-job-keeper
+              topologyKey: kubernetes.io/hostname
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: raft-job-keeper
+      containers:
+        - name: raft-job-keeper
+          image: raft-job-keeper:0.1.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - --config=/etc/raft-job-keeper/config.yaml
+            - --raft.data-dir=/data
+            - --raft.port=7000
+            - --server.port=8080
+            - --grpc.port=9090
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: NODE_ID
+              value: "$(POD_NAME)"
+            - name: PEERS_DNS
+              value: "raft-job-keeper-headless.$(POD_NAMESPACE).svc.cluster.local"
+            - name: ADVERTISE_ADDR
+              value: "$(POD_NAME).raft-job-keeper-headless.$(POD_NAMESPACE).svc.cluster.local:7000"
+            - name: BOOTSTRAP_EXPECT
+              value: "3"
+          ports:
+            - name: raft
+              containerPort: 7000
+            - name: http
+              containerPort: 8080
+            - name: grpc
+              containerPort: 9090
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 6
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            failureThreshold: 60
+          lifecycle:
+            preStop:
+              exec:
+                # Hand over leadership before shutdown; call leave only when scaling in (see deployment doc)
+                command: ["curl", "-sf", "-X", "POST", "http://localhost:8080/admin/transfer-leadership"]
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: config
+              mountPath: /etc/raft-job-keeper
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: raft-job-keeper-config
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        # storageClassName: fast-ssd
+        resources:
+          requests:
+            storage: 10Gi

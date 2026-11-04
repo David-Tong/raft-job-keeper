@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: raft-job-keeper-config
+  namespace: raft-job-keeper
+data:
+  config.yaml: |
+    raft:
+      bootstrapExpect: 3
+      heartbeatTimeout: 1s
+      electionTimeout: 1s
+      leaderLeaseTimeout: 500ms
+      snapshotThreshold: 8192
+      snapshotRetain: 2
+    scheduler:
+      leaseDuration: 30s
+      heartbeatBatchInterval: 5s
+      taskRetention: 168h
+    log:
+      level: info
+      format: json

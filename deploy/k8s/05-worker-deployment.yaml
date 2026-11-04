@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: raft-job-keeper-worker
+  namespace: raft-job-keeper
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: raft-job-keeper-worker
+  template:
+    metadata:
+      labels:
+        app: raft-job-keeper-worker
+    spec:
+      terminationGracePeriodSeconds: 120
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+      containers:
+        - name: worker
+          image: raft-job-keeper-worker:0.1.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: WORKER_ID
+              value: "$(POD_NAME)"
+            - name: SERVER_ADDR
+              value: "raft-job-keeper-api.raft-job-keeper.svc.cluster.local:9090"
+            - name: WORKER_CAPACITY
+              value: "10"
+          resources:
+            requests:
+              cpu: 200m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: raft-job-keeper-worker
+  namespace: raft-job-keeper
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: raft-job-keeper-worker
+  minReplicas: 3
+  maxReplicas: 30
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

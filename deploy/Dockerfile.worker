@@ -1,0 +1,17 @@
+FROM maven:3.9-eclipse-temurin-21 AS build
+WORKDIR /src
+COPY pom.xml ./
+COPY job-keeper-common/pom.xml job-keeper-common/
+COPY job-keeper-server/pom.xml job-keeper-server/
+COPY job-keeper-worker/pom.xml job-keeper-worker/
+RUN mvn -B -q -pl job-keeper-worker -am dependency:go-offline
+COPY . .
+RUN mvn -B -q -pl job-keeper-worker -am package -DskipTests
+
+FROM eclipse-temurin:21-jre-alpine
+RUN apk add --no-cache curl bash tzdata \
+ && addgroup -S -g 10001 app && adduser -S -u 10001 -G app app
+COPY --from=build /src/job-keeper-worker/target/job-keeper-worker.jar /app/job-keeper-worker.jar
+USER 10001
+ENV JAVA_OPTS="-XX:MaxRAMPercentage=70 -XX:+ExitOnOutOfMemoryError"
+ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS -jar /app/job-keeper-worker.jar"]

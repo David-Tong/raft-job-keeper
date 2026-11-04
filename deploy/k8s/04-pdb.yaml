@@ -1,0 +1,10 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: raft-job-keeper
+  namespace: raft-job-keeper
+spec:
+  minAvailable: 2 # keep a quorum with 3 replicas
+  selector:
+    matchLabels:
+      app: raft-job-keeper
