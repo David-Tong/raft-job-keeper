@@ -32,6 +32,11 @@ spec:
               value: "raft-job-keeper-api.raft-job-keeper.svc.cluster.local:9090"
             - name: WORKER_CAPACITY
               value: "10"
+            - name: WORKER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: raft-job-keeper-auth
+                  key: worker-token
           resources:
             requests:
               cpu: 200m

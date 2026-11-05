@@ -6,10 +6,13 @@ metadata:
 data:
   config.yaml: |
     raft:
+      initialPeers: "raft-job-keeper-0.raft-job-keeper-headless.raft-job-keeper.svc.cluster.local:7000,raft-job-keeper-1.raft-job-keeper-headless.raft-job-keeper.svc.cluster.local:7000,raft-job-keeper-2.raft-job-keeper-headless.raft-job-keeper.svc.cluster.local:7000"
       bootstrapExpect: 3
       heartbeatTimeout: 1s
       electionTimeout: 1s
       leaderLeaseTimeout: 500ms
+      electionTimeoutMs: 1000
+      snapshotIntervalSecs: 600
       snapshotThreshold: 8192
       snapshotRetain: 2
     scheduler:

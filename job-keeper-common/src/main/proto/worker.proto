@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+package raftjobkeeper.worker.v1;
+
+option java_package = "io.ytong.raftjobkeeper.common.grpc";
+option java_multiple_files = true;
+
+service WorkerService {
+  rpc Connect(stream WorkerMessage) returns (stream ServerMessage);
+}
+
+message WorkerMessage {
+  string type = 1;
+  string worker_id = 2;
+  string address = 3;
+  int32 capacity = 4;
+  map<string, string> labels = 5;
+  string task_id = 6;
+  int32 attempt = 7;
+  string status = 8;
+  string result = 9;
+  string token = 10;
+}
+
+message ServerMessage {
+  string type = 1;
+  string leader = 2;
+  TaskAssignment task = 3;
+}
+
+message TaskAssignment {
+  string task_id = 1;
+  string job_id = 2;
+  string executor = 3;
+  string command = 4;
+  repeated string args = 5;
+  map<string, string> env = 6;
+  int32 attempt = 7;
+  int64 timeout_millis = 8;
+  int64 term = 9;
+}

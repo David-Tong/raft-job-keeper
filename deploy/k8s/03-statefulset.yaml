@@ -45,7 +45,7 @@ spec:
           image: raft-job-keeper:0.1.0
           imagePullPolicy: IfNotPresent
           args:
-            - --config=/etc/raft-job-keeper/config.yaml
+            - --spring.config.additional-location=file:/etc/raft-job-keeper/config.yaml
             - --raft.data-dir=/data
             - --raft.port=7000
             - --server.port=8080
@@ -67,6 +67,16 @@ spec:
               value: "$(POD_NAME).raft-job-keeper-headless.$(POD_NAMESPACE).svc.cluster.local:7000"
             - name: BOOTSTRAP_EXPECT
               value: "3"
+            - name: API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: raft-job-keeper-auth
+                  key: api-token
+            - name: WORKER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: raft-job-keeper-auth
+                  key: worker-token
           ports:
             - name: raft
               containerPort: 7000
@@ -97,7 +107,7 @@ spec:
             preStop:
               exec:
                 # Hand over leadership before shutdown; call leave only when scaling in (see deployment doc)
-                command: ["curl", "-sf", "-X", "POST", "http://localhost:8080/admin/transfer-leadership"]
+                command: ["curl", "-sf", "-X", "POST", "-H", "Authorization: Bearer $(API_TOKEN)", "http://localhost:8080/admin/transfer-leadership"]
           resources:
             requests:
               cpu: 250m

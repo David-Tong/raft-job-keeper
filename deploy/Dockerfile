@@ -16,6 +16,6 @@ COPY --from=build /src/job-keeper-server/target/job-keeper-server.jar /app/job-k
 USER 10001
 VOLUME ["/data"]
 EXPOSE 7000 8080 9090
-ENV JAVA_OPTS="-XX:MaxRAMPercentage=70 -XX:+ExitOnOutOfMemoryError"
+ENV JAVA_OPTS="-XX:MaxRAMPercentage=70 -XX:+ExitOnOutOfMemoryError --add-opens=java.base/java.util=ALL-UNNAMED"
 ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS -jar /app/job-keeper-server.jar \"$@\"", "--"]
 CMD ["--raft.data-dir=/data", "--raft.port=7000", "--server.port=8080", "--grpc.port=9090"]
