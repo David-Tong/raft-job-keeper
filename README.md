@@ -1,88 +1,108 @@
-# Raft Job Keeper
+﻿# Raft Job Keeper
 
-Raft Job Keeper is a Java 21, Maven multi-module job scheduler built around SOFAJRaft.
-Every server runs the same Raft state machine and REST API; only the elected leader
-dispatches tasks. Workers are separate processes and communicate with the leader over
-gRPC streams.
+Raft Job Keeper 是基于 Java 21、Spring Boot 和 SOFAJRaft 的多模块任务调度项目。Server 通过 Raft 复制状态，只有 Leader 分发任务；独立运行的 Worker 通过 gRPC 双向流连接 Server 并执行任务。
 
-## Modules
+## 项目结构
 
-- [`job-keeper-common`](job-keeper-common/README.md): domain records, Raft command envelope,
-  and worker gRPC protocol.
-- [`job-keeper-server`](job-keeper-server/README.md): Spring Boot REST API, SOFAJRaft
-  node/FSM, snapshots, lease reclaimer, task dispatcher, and worker gRPC service.
-- [`job-keeper-worker`](job-keeper-worker/README.md): reconnecting worker runtime and task
-  executors.
+- [job-keeper-common](job-keeper-common/README.md)：共享领域模型、Raft 命令和 gRPC 协议。
+- [job-keeper-server](job-keeper-server/README.md)：REST API、Raft 状态机、任务分发、租约和快照。
+- [job-keeper-worker](job-keeper-worker/README.md)：Worker 运行时以及 shell、HTTP 执行器。
+- [deploy](deploy/)：容器和 Kubernetes 部署资源。
 
-## Build
+## 本地测试环境（Windows PowerShell）
 
-Use JDK 21 and Maven 3.9 or newer:
+以下命令均从仓库根目录运行。需要 JDK 21、Maven 3.9 或更高版本，以及可用的 7000、8080、9090 端口。首次构建需要联网下载 Maven 依赖。确保 `java -version` 和 `mvn -version` 都显示 Java 21；如果安装了多个 JDK，可以在每个终端中设置：
 
-```shell
+```powershell
+$env:JAVA_HOME = 'C:\path\to\jdk-21' # 改为实际安装路径
+$env:Path = "$env:JAVA_HOME\bin;$env:Path"
+java -version
+mvn -version
+```
+
+### 1. 构建并运行自动化测试
+
+```powershell
 mvn -B verify
 ```
 
-The server stores Raft logs, metadata, and snapshots under `/data` by default. For local
-development, set a writable `RAFT_DATA_DIR`, `API_TOKEN`, and `WORKER_TOKEN`, then start a
-single-node server:
+成功后会生成 `job-keeper-server/target/job-keeper-server.jar` 和 `job-keeper-worker/target/job-keeper-worker.jar`。
 
-```shell
-mvn -pl job-keeper-server -am package
-JAVA_TOOL_OPTIONS="--add-opens=java.base/java.util=ALL-UNNAMED" \
-  java -jar job-keeper-server/target/job-keeper-server.jar \
-  --raft.data-dir=./data --raft.self-address=localhost:7000 --raft.initial-peers=localhost:7000
+### 2. 启动单节点 Server
+
+在第一个 PowerShell 终端中执行，保持窗口运行：
+
+```powershell
+$env:API_TOKEN = 'dev-token'
+$env:WORKER_TOKEN = 'dev-token'
+java --add-opens=java.base/java.util=ALL-UNNAMED -jar job-keeper-server/target/job-keeper-server.jar --raft.data-dir=./data --raft.self-address=localhost:7000 --raft.initial-peers=localhost:7000
 ```
 
-Start a worker in another process:
+`./data` 保存本地 Raft 日志和快照。等待节点完成 Leader 选举后，在另一个终端检查：
 
-```shell
-WORKER_ID=worker-1 SERVER_ADDR=localhost:9090 WORKER_TOKEN=dev-token \
-  java -jar job-keeper-worker/target/job-keeper-worker.jar
+```powershell
+Invoke-RestMethod http://localhost:8080/healthz
+Invoke-RestMethod http://localhost:8080/readyz
+Invoke-RestMethod http://localhost:8080/leaderz
 ```
 
-Use the same bearer token configured as `API_TOKEN` for API write/admin requests:
+### 3. 启动 Worker
 
-```shell
-curl -H "Authorization: Bearer dev-token" -H "Content-Type: application/json" \
-  -d '{"name":"example","payload":{"executor":"shell","command":"echo","args":["hello"]}}' \
-  http://localhost:8080/jobs
+在第二个 PowerShell 终端中执行，保持窗口运行：
+
+```powershell
+$env:WORKER_ID = 'worker-1'
+$env:SERVER_ADDR = 'localhost:9090'
+$env:WORKER_TOKEN = 'dev-token'
+java -jar job-keeper-worker/target/job-keeper-worker.jar
 ```
 
-`GET /jobs`, `GET /tasks`, and individual resource reads are linearizable by default.
-Pass `?consistency=stale` to read a follower's local state. Use the `Idempotency-Key`
-header when calling `POST /jobs/{id}/run` so client retries cannot create duplicate tasks.
+Worker 的令牌必须与 Server 的 `WORKER_TOKEN` 一致。等待 Worker 连接后，打开第三个终端执行下面的端到端测试。
 
-## Configuration
+### 4. 创建并运行任务
 
-| Setting | Default | Description |
+```powershell
+$headers = @{ Authorization = 'Bearer dev-token' }
+$body = @{
+    name = 'local-example'
+    payload = @{ executor = 'shell'; command = 'cmd.exe'; args = @('/c', 'echo hello') }
+} | ConvertTo-Json -Depth 5
+$job = Invoke-RestMethod -Method Post -Uri http://localhost:8080/jobs -Headers $headers -ContentType 'application/json' -Body $body
+$job
+$runHeaders = @{ Authorization = 'Bearer dev-token'; 'Idempotency-Key' = [guid]::NewGuid().ToString() }
+$task = Invoke-RestMethod -Method Post -Uri "http://localhost:8080/jobs/$($job.id)/run" -Headers $runHeaders
+$task
+Invoke-RestMethod "http://localhost:8080/tasks/$($task.id)"
+```
+
+任务是异步执行的；如果状态仍为 `PENDING` 或 `RUNNING`，稍后再次查询。成功时状态为 `SUCCEEDED`，结果应包含 `hello`。也可以用 `Invoke-RestMethod http://localhost:8080/tasks` 查看所有任务。重试同一次触发请求时复用其 `Idempotency-Key`，避免创建重复任务；新的运行使用新 key。
+
+使用 Ctrl+C 分别停止 Worker 和 Server。需要全新状态时，先停止 Server，再手动删除本地 `data` 目录；这会删除其中的任务和 Raft 数据。若端口冲突，请检查占用或调整 Server 配置与 Worker 地址。
+
+## 配置
+
+| 配置 / 环境变量 | 默认值 | 用途 |
 |---|---|---|
-| `raft.data-dir` / `RAFT_DATA_DIR` | `/data` | Persistent Raft data directory |
-| `raft.self-address` / `ADVERTISE_ADDR` | `localhost:7000` | This node's advertised Raft address |
-| `raft.initial-peers` / `RAFT_INITIAL_PEERS` | `localhost:7000` | Comma-separated Raft peer addresses |
-| `scheduler.lease-duration` | `30s` | Worker task lease |
-| `grpc.port` | `9090` | Worker gRPC service port |
-| `API_TOKEN` | unset | Required bearer token for REST writes/admin |
-| `WORKER_TOKEN` | unset | Required token on worker registration |
+| `raft.data-dir` / `RAFT_DATA_DIR` | `/data` | Raft 持久化目录 |
+| `raft.self-address` / `ADVERTISE_ADDR` | `localhost:7000` | 本节点 Raft 地址 |
+| `raft.initial-peers` / `RAFT_INITIAL_PEERS` | `localhost:7000` | 逗号分隔的初始节点地址 |
+| `scheduler.lease-duration` | `30s` | 任务租约时长 |
+| `grpc.port` | `9090` | Worker gRPC 端口 |
+| `API_TOKEN` | 未设置 | REST 写入和管理接口的 Bearer 令牌 |
+| `WORKER_TOKEN` | 回退到 `API_TOKEN` | Worker 注册令牌 |
+| `WORKER_ID` | 自动生成 | Worker 标识 |
+| `SERVER_ADDR` | `localhost:9090` | Worker 连接的 gRPC 地址 |
+| `WORKER_CAPACITY` | `4` | Worker 最大并发任务数 |
 
-For multi-node deployments all servers must use the same `raft.initial-peers` list and
-stable per-node `ADVERTISE_ADDR` values. Keep the peer set odd-sized and provision a
-persistent volume for each server. Kubernetes manifests expect the `raft-job-keeper-auth`
-Secret with `api-token` and `worker-token` keys to be provisioned before deployment.
+多节点部署时，各 Server 使用相同的初始节点列表、稳定且各不相同的 Raft 地址及独立持久卷，节点数量建议为奇数。Kubernetes 部署需要预先创建包含 `api-token` 和 `worker-token` 的 `raft-job-keeper-auth` Secret。
 
-The worker's `shell` executor executes the configured executable directly with
-`ProcessBuilder` (it does not implicitly invoke a shell). Treat job creation as a
-privileged operation and restrict API token access accordingly. The `container`
-executor is not enabled yet.
+`shell` 执行器使用 `ProcessBuilder` 直接启动命令，不会自动调用 shell；上面的 Windows 示例显式运行 `cmd.exe`。创建任务可以执行任意本机命令，应严格保护 API 令牌并使用可信 Worker。容器执行器尚未实现。
 
-## API
+## API 概览
 
-- `POST /jobs`, `GET /jobs`, `GET /jobs/{id}`, `PUT /jobs/{id}`, `DELETE /jobs/{id}`
-- `POST /jobs/{id}/enable`, `POST /jobs/{id}/disable`, `POST /jobs/{id}/run`
-- `GET /tasks`, `GET /tasks/{id}`
-- Worker gRPC bidirectional stream on port `9090`
-- `GET /healthz`, `GET /readyz`, `GET /leaderz`, `GET /metrics`
-- `GET /admin/cluster/status`, `POST /admin/snapshot`
-- `POST /admin/cluster/join`, `POST /admin/cluster/leave`,
-  `POST /admin/transfer-leadership`
+- Job：`POST /jobs`、`GET /jobs`、`GET /jobs/{id}`、`PUT /jobs/{id}`、`DELETE /jobs/{id}`，以及 `POST /jobs/{id}/enable`、`disable`、`run`。
+- Task：`GET /tasks`、`GET /tasks/{id}`。
+- 健康与监控：`GET /healthz`、`/readyz`、`/leaderz`、`/metrics`。
+- 管理：`GET /admin/cluster/status`、`POST /admin/snapshot`、`/admin/cluster/join`、`/admin/cluster/leave`、`/admin/transfer-leadership`。
 
-Deployment assets are in [`deploy/`](./deploy/); Maven artifact names match the Dockerfiles.
+Job 和 Task 读取默认使用强一致性；可添加 `?consistency=stale` 读取节点本地状态。写入及管理请求需要 Bearer 令牌。
