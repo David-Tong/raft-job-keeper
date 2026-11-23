@@ -7,10 +7,12 @@ gRPC streams.
 
 ## Modules
 
-- `job-keeper-common`: domain records, Raft command envelope, and worker gRPC protocol.
-- `job-keeper-server`: Spring Boot REST API, SOFAJRaft node/FSM, snapshots, lease reclaimer,
-  task dispatcher, and worker gRPC service.
-- `job-keeper-worker`: reconnecting worker runtime and shell task executor.
+- [`job-keeper-common`](job-keeper-common/README.md): domain records, Raft command envelope,
+  and worker gRPC protocol.
+- [`job-keeper-server`](job-keeper-server/README.md): Spring Boot REST API, SOFAJRaft
+  node/FSM, snapshots, lease reclaimer, task dispatcher, and worker gRPC service.
+- [`job-keeper-worker`](job-keeper-worker/README.md): reconnecting worker runtime and task
+  executors.
 
 ## Build
 
